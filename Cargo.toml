@@ -1,0 +1,64 @@
+[workspace]
+members = [
+    ".",
+    "crates/orion-raft",
+    "crates/orion-sqlite",
+]
+resolver = "3"
+
+[workspace.dependencies]
+anyhow = "1.0"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+bytes = "1.10"
+futures-util = "0.3"
+openraft = { version = "0.10.0-alpha.20", features = ["serde"] }
+openraft-rt = "0.10.0-alpha.20"
+postcard = { version = "1.1.3", features = ["use-std"] }
+prost = "0.14"
+rocksdb = { version = "0.24", default-features = false }
+rusqlite = { version = "0.38", features = ["backup", "blob", "bundled", "column_decltype", "hooks"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "0.10"
+slatedb = { version = "0.13.1", default-features = false }
+sqlite-plugin = "0.10.1"
+tempfile = "3.23"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "time", "net", "sync"] }
+tokio-stream = { version = "0.1", features = ["net", "sync"] }
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+protoc-bin-vendored = "3"
+uuid = "1.23"
+
+[package]
+name = "orion"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+orion-raft = { path = "crates/orion-raft" }
+orion-sqlite = { path = "crates/orion-sqlite" }
+openraft.workspace = true
+openraft-rt.workspace = true
+postcard.workspace = true
+rusqlite.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+slatedb.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = "0.5"

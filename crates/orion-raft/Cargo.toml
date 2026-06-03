@@ -1,0 +1,31 @@
+[package]
+name = "orion-raft"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+orion-sqlite = { path = "../orion-sqlite" }
+openraft.workspace = true
+openraft-rt.workspace = true
+postcard.workspace = true
+prost.workspace = true
+rocksdb.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slatedb.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+uuid.workspace = true
+
+[build-dependencies]
+protoc-bin-vendored.workspace = true
+tonic-prost-build.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

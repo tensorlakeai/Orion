@@ -1,0 +1,77 @@
+node:
+  id: 2
+  raft_addr: "127.0.0.1:7102"
+  topology:
+    cloud: "gcp"
+    region: "us-central1"
+    zone: "us-central1-a"
+
+roles: ["all"]
+
+storage:
+  object_store:
+    type: local
+    root: "./data/object-store"
+  local:
+    data_root: "./data/node-2"
+  object_prefixes:
+    node_state: "node-2/state"
+
+peers:
+  - id: 1
+    raft_addr: "127.0.0.1:7101"
+    libsql_http_addr: "http://127.0.0.1:8081"
+    topology:
+      cloud: "aws"
+      region: "us-east-1"
+      zone: "use1-az1"
+  - id: 3
+    raft_addr: "127.0.0.1:7103"
+    libsql_http_addr: "http://127.0.0.1:8083"
+    topology:
+      cloud: "azure"
+      region: "eastus"
+      zone: "1"
+
+bootstrap:
+  create_default_group: false
+  default_group:
+    group_id: "rg_default"
+    voters: [1, 2, 3]
+
+runtime:
+  max_hosted_groups: 128
+  max_open_databases: 10000
+  group_start_concurrency: 8
+  shutdown_grace_ms: 10000
+
+raft:
+  cluster_name: "orion-multicloud-demo"
+  heartbeat_interval_ms: 250
+  election_timeout_min_ms: 2500
+  election_timeout_max_ms: 5000
+  replication_lag_threshold: 20000
+  install_snapshot_timeout_ms: 60000
+  max_payload_entries: 512
+  max_append_entries: 4096
+  snapshot_max_chunk_size: 4194304
+  snapshot_policy:
+    logs_since_last: 10000
+  max_in_snapshot_log_to_keep: 2000
+  purge_batch_size: 512
+
+transport:
+  connect_timeout_ms: 5000
+  rpc_timeout_ms: 15000
+  max_message_size: 8388608
+
+metrics:
+  log_interval_ms: 10000
+
+readiness:
+  timeout_ms: 30000
+  probe_interval_ms: 100
+  probe_rpc_timeout_ms: 1000
+
+libsql_http:
+  bind_addr: "127.0.0.1:8082"

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package orion.raft.v1;
+
+service RaftTransport {
+  rpc AppendEntries(RaftMessage) returns (RaftMessage);
+  rpc Vote(RaftMessage) returns (RaftMessage);
+  rpc FullSnapshot(stream RaftMessage) returns (RaftMessage);
+  rpc TransferLeader(RaftMessage) returns (RaftMessage);
+  rpc ClientWrite(RaftMessage) returns (RaftMessage);
+  rpc ClientBarrier(RaftMessage) returns (RaftMessage);
+}
+
+message RaftMessage {
+  bytes payload = 1;
+  bytes metrics_payload = 2;
+  string group_id = 3;
+}

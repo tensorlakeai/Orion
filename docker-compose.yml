@@ -1,0 +1,115 @@
+name: orion
+
+services:
+  orion-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: orion-dev:local
+    working_dir: /workspace
+    command:
+      [
+        "sh",
+        "-lc",
+        "/usr/local/cargo/bin/cargo build --locked --bin orion && mkdir -p /opt/orion-bin && cp /workspace/target/debug/orion /opt/orion-bin/orion && chmod +x /opt/orion-bin/orion",
+      ]
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/workspace/target
+      - orion-bin:/opt/orion-bin
+
+  orion-node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: orion-dev:local
+    working_dir: /workspace
+    command:
+      [
+        "/opt/orion-bin/orion",
+        "--config",
+        "${ORION_DOCKER_NODE1_CONFIG:-/workspace/docker/cluster/node1.yaml}",
+      ]
+    depends_on:
+      orion-build:
+        condition: service_completed_successfully
+      orion-node2:
+        condition: service_started
+      orion-node3:
+        condition: service_started
+    ports:
+      - "${ORION_DOCKER_HTTP_PORT_1:-8081}:8080"
+      - "${ORION_DOCKER_RAFT_PORT_1:-7101}:7101"
+    volumes:
+      - .:/workspace
+      - orion-bin:/opt/orion-bin:ro
+      - orion-node1:/var/lib/orion/node-1
+      - ${ORION_DOCKER_OBJECT_STORE_VOLUME_1:-orion-object-store-node1}:/var/lib/orion/object-store-node1
+
+  orion-node2:
+    image: orion-dev:local
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command:
+      [
+        "/opt/orion-bin/orion",
+        "--config",
+        "${ORION_DOCKER_NODE2_CONFIG:-/workspace/docker/cluster/node2.yaml}",
+      ]
+    depends_on:
+      orion-build:
+        condition: service_completed_successfully
+    ports:
+      - "${ORION_DOCKER_HTTP_PORT_2:-8082}:8080"
+      - "${ORION_DOCKER_RAFT_PORT_2:-7102}:7102"
+    volumes:
+      - .:/workspace
+      - orion-bin:/opt/orion-bin:ro
+      - orion-node2:/var/lib/orion/node-2
+      - ${ORION_DOCKER_OBJECT_STORE_VOLUME_2:-orion-object-store-node2}:/var/lib/orion/object-store-node2
+
+  orion-node3:
+    image: orion-dev:local
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command:
+      [
+        "/opt/orion-bin/orion",
+        "--config",
+        "${ORION_DOCKER_NODE3_CONFIG:-/workspace/docker/cluster/node3.yaml}",
+      ]
+    depends_on:
+      orion-build:
+        condition: service_completed_successfully
+    ports:
+      - "${ORION_DOCKER_HTTP_PORT_3:-8083}:8080"
+      - "${ORION_DOCKER_RAFT_PORT_3:-7103}:7103"
+    volumes:
+      - .:/workspace
+      - orion-bin:/opt/orion-bin:ro
+      - orion-node3:/var/lib/orion/node-3
+      - ${ORION_DOCKER_OBJECT_STORE_VOLUME_3:-orion-object-store-node3}:/var/lib/orion/object-store-node3
+
+volumes:
+  cargo-registry:
+    name: orion-cargo-registry
+  cargo-git:
+    name: orion-cargo-git
+  cargo-target:
+    name: orion-cargo-target
+  orion-bin:
+    name: orion-bin
+  orion-node1:
+  orion-node2:
+  orion-node3:
+  orion-object-store-node1:
+  orion-object-store-node2:
+  orion-object-store-node3:
+  orion-object-store-region-us-east-1:
+  orion-object-store-region-eastus:

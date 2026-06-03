@@ -1,0 +1,13 @@
+[package]
+name = "orion-sqlite"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+sqlite-plugin.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

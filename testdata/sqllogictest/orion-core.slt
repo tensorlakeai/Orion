@@ -1,0 +1,177 @@
+# Curated sqllogictest corpus for Orion's SQLite/libSQL query surface.
+# This is intentionally small enough to run in local smoke tests. Larger
+# imported SQLite/libSQL corpora should be added beside this file over time.
+
+statement ok
+PRAGMA foreign_keys = ON
+
+statement ok
+CREATE TABLE slt_parent (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  child_count INTEGER NOT NULL DEFAULT 0
+)
+
+statement ok
+CREATE TABLE slt_child (
+  id INTEGER PRIMARY KEY,
+  parent_id INTEGER NOT NULL REFERENCES slt_parent(id),
+  label TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount >= 0)
+)
+
+statement ok
+CREATE INDEX slt_child_parent_amount_idx ON slt_child(parent_id, amount)
+
+statement ok
+CREATE VIEW slt_child_summary AS
+  SELECT parent_id, count(*) AS children, sum(amount) AS total
+  FROM slt_child
+  GROUP BY parent_id
+
+statement ok
+CREATE TRIGGER slt_child_ai AFTER INSERT ON slt_child
+BEGIN
+  UPDATE slt_parent
+  SET child_count = child_count + 1
+  WHERE id = new.parent_id;
+END
+
+statement ok
+INSERT INTO slt_parent(id, name) VALUES (1, 'acme'), (2, 'globex')
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO slt_child(id, parent_id, label, amount) VALUES (10, 1, 'api', 5)
+
+statement ok
+SAVEPOINT adjust_amount
+
+statement ok
+UPDATE slt_child SET amount = 99 WHERE id = 10
+
+statement ok
+ROLLBACK TO adjust_amount
+
+statement ok
+RELEASE adjust_amount
+
+statement ok
+INSERT INTO slt_child(id, parent_id, label, amount) VALUES (11, 1, 'worker', 7)
+
+statement ok
+COMMIT
+
+query TII nosort
+WITH totals AS (
+  SELECT parent_id, sum(amount) AS total
+  FROM slt_child
+  GROUP BY parent_id
+)
+SELECT p.name, p.child_count, totals.total
+FROM slt_parent AS p
+JOIN totals ON totals.parent_id = p.id
+WHERE p.id = 1
+----
+acme
+2
+12
+
+query II nosort
+SELECT children, total FROM slt_child_summary WHERE parent_id = 1
+----
+2
+12
+
+statement error
+INSERT INTO slt_child(id, parent_id, label, amount) VALUES (12, 404, 'orphan', 1)
+
+statement error
+INSERT INTO slt_child(id, parent_id, label, amount) VALUES (13, 1, 'bad', -1)
+
+statement error
+INSERT INTO slt_parent(id, name) VALUES (3, 'acme')
+
+query IT rowsort
+SELECT id, name FROM slt_parent
+----
+1
+acme
+2
+globex
+
+statement ok
+ALTER TABLE slt_parent ADD COLUMN tier TEXT NOT NULL DEFAULT 'standard'
+
+statement ok
+UPDATE slt_parent SET tier = 'gold' WHERE id = 1
+
+query TT rowsort
+SELECT name, tier FROM slt_parent
+----
+acme
+gold
+globex
+standard
+
+statement ok
+CREATE TABLE slt_generated (
+  id INTEGER PRIMARY KEY,
+  base INTEGER NOT NULL,
+  doubled INTEGER GENERATED ALWAYS AS (base * 2) STORED
+)
+
+statement ok
+INSERT INTO slt_generated(id, base) VALUES (1, 4), (2, 9)
+
+query II rowsort
+SELECT id, doubled FROM slt_generated
+----
+1
+8
+2
+18
+
+statement ok
+CREATE TABLE slt_strict (
+  id INTEGER PRIMARY KEY,
+  amount INTEGER NOT NULL
+) STRICT
+
+statement ok
+INSERT INTO slt_strict(id, amount) VALUES (1, 42)
+
+statement error
+INSERT INTO slt_strict(id, amount) VALUES (2, 'not-an-integer')
+
+query I nosort
+SELECT amount FROM slt_strict WHERE id = 1
+----
+42
+
+query T nosort
+PRAGMA integrity_check
+----
+ok
+
+query T nosort
+PRAGMA quick_check
+----
+ok
+
+statement error
+VACUUM
+
+statement error
+VACUUM INTO '/tmp/orion-unsafe-copy.db'
+
+statement error
+ATTACH DATABASE ':memory:' AS other
+
+statement error
+PRAGMA writable_schema = ON
+
+statement error
+SELECT load_extension('not-real')

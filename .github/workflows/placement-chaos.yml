@@ -1,0 +1,207 @@
+name: Docker chaos
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Docker chaos suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - cluster
+          - placement
+  pull_request:
+    paths:
+      - .github/workflows/placement-chaos.yml
+      - Cargo.lock
+      - Cargo.toml
+      - Dockerfile.dev
+      - docker-compose.yml
+      - docker/**
+      - crates/**
+      - proto/**
+      - scripts/docker-cluster-chaos.mjs
+      - scripts/docker-cluster-chaos.sh
+      - scripts/docker-placement-*.mjs
+      - scripts/docker-placement-*.sh
+      - README.md
+      - README_new.md
+      - docs/db-placement-dead-source-failover.md
+      - src/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/placement-chaos.yml
+      - Cargo.lock
+      - Cargo.toml
+      - Dockerfile.dev
+      - docker-compose.yml
+      - docker/**
+      - crates/**
+      - proto/**
+      - scripts/docker-cluster-chaos.mjs
+      - scripts/docker-cluster-chaos.sh
+      - scripts/docker-placement-*.mjs
+      - scripts/docker-placement-*.sh
+      - README.md
+      - README_new.md
+      - docs/db-placement-dead-source-failover.md
+      - src/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-chaos-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORION_DOCKER_BUILD_TIMEOUT_MS: "1200000"
+  ORION_DOCKER_STARTUP_TIMEOUT_MS: "180000"
+  ORION_DOCKER_SETTLE_TIMEOUT_MS: "90000"
+  ORION_DOCKER_MOVE_TIMEOUT_MS: "240000"
+  ORION_DOCKER_REQUEST_TIMEOUT_MS: "30000"
+  ORION_DOCKER_POLL_MS: "1000"
+  ORION_DOCKER_PROGRESS_MS: "30000"
+
+jobs:
+  placement-chaos-checks:
+    name: Placement chaos checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check Docker chaos script syntax
+        run: |
+          node --check scripts/docker-cluster-crash-smoke.mjs
+          node --check scripts/docker-cluster-chaos.mjs
+          node --check scripts/docker-placement-benchmark.mjs
+          node --check scripts/docker-placement-move-smoke.mjs
+          node --check scripts/docker-placement-chaos.mjs
+          docker compose config --quiet
+
+      - name: Check whitespace in owned docs and workflow
+        run: |
+          for path in \
+            .github/workflows/placement-chaos.yml \
+            docker-compose.yml \
+            scripts/docker-cluster-crash-smoke.mjs \
+            scripts/docker-cluster-chaos.mjs \
+            scripts/docker-placement-benchmark.mjs \
+            scripts/docker-placement-benchmark.sh \
+            scripts/docker-placement-move-smoke.mjs \
+            scripts/docker-placement-chaos.mjs \
+            README.md \
+            README_new.md \
+            docs/db-placement-dead-source-failover.md; do
+            test -f "$path"
+            ! grep -n '[[:blank:]]$' "$path"
+          done
+
+  cluster-chaos:
+    name: Cluster chaos
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: placement-chaos-checks
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'all' || inputs.suite == 'cluster') ||
+      github.event_name != 'workflow_dispatch'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Run cluster chaos
+        env:
+          ORION_DOCKER_PROJECT: orion-cluster-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: scripts/docker-cluster-chaos.sh
+
+      - name: Collect cluster chaos diagnostics
+        if: always()
+        env:
+          ORION_DOCKER_PROJECT: orion-cluster-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p artifacts/cluster-chaos
+          docker compose --project-name "$ORION_DOCKER_PROJECT" ps > artifacts/cluster-chaos/compose-ps.txt || true
+          docker compose --project-name "$ORION_DOCKER_PROJECT" logs --no-color > artifacts/cluster-chaos/compose.log || true
+
+      - name: Upload cluster chaos diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/cluster-chaos
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup Docker resources
+        if: always()
+        env:
+          ORION_DOCKER_PROJECT: orion-cluster-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: docker compose --project-name "$ORION_DOCKER_PROJECT" down --remove-orphans --volumes
+
+  placement-chaos:
+    name: Placement chaos
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: placement-chaos-checks
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'all' || inputs.suite == 'placement') ||
+      github.event_name != 'workflow_dispatch'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Run placement chaos
+        env:
+          ORION_DOCKER_PROJECT: orion-placement-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -o pipefail
+          mkdir -p artifacts/placement-chaos
+          scripts/docker-placement-chaos.sh 2>&1 | tee artifacts/placement-chaos/runner.log
+
+      - name: Collect placement chaos diagnostics
+        if: always()
+        env:
+          ORION_DOCKER_PROJECT: orion-placement-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p artifacts/placement-chaos
+          docker compose --project-name "$ORION_DOCKER_PROJECT" ps > artifacts/placement-chaos/compose-ps.txt || true
+          docker compose --project-name "$ORION_DOCKER_PROJECT" ps -a > artifacts/placement-chaos/compose-ps-all.txt || true
+          docker compose --project-name "$ORION_DOCKER_PROJECT" logs --no-color > artifacts/placement-chaos/compose.log || true
+
+      - name: Upload placement chaos diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/placement-chaos
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup Docker resources
+        if: always()
+        env:
+          ORION_DOCKER_PROJECT: orion-placement-chaos-${{ github.run_id }}-${{ github.run_attempt }}
+        run: docker compose --project-name "$ORION_DOCKER_PROJECT" down --remove-orphans --volumes

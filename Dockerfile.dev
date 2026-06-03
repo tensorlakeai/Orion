@@ -1,0 +1,13 @@
+FROM rust:1-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends cmake g++ libclang-dev make pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:$PATH
+ENV CARGO_TARGET_DIR=/workspace/target
+
+WORKDIR /workspace
