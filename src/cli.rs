@@ -8,11 +8,15 @@ const DEFAULT_URL: &str = "http://127.0.0.1:8091/appdb";
 pub async fn run_cli(url: Option<String>) -> anyhow::Result<()> {
     let raw_url = default_cli_url(url)?;
     let endpoint = PipelineEndpoint::parse(&raw_url)?;
-    let auth_token = std::env::var("LIBSQL_AUTH_TOKEN").ok();
+    let sql_auth_token = std::env::var("LIBSQL_AUTH_TOKEN").ok();
+    let operator_auth_token = std::env::var("ORION_AUTH_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("LIBSQL_AUTH_TOKEN").ok());
     let mut shell = OrionCli {
         client: reqwest::Client::new(),
         endpoint,
-        auth_token,
+        sql_auth_token,
+        operator_auth_token,
         baton: None,
         buffer: String::new(),
     };
@@ -47,7 +51,8 @@ fn database_url_from_orion_url(raw_url: &str, database: &str) -> anyhow::Result<
 struct OrionCli {
     client: reqwest::Client,
     endpoint: PipelineEndpoint,
-    auth_token: Option<String>,
+    sql_auth_token: Option<String>,
+    operator_auth_token: Option<String>,
     baton: Option<String>,
     buffer: String,
 }
@@ -56,6 +61,7 @@ impl OrionCli {
     async fn run(&mut self) -> anyhow::Result<()> {
         println!("Connected to {}", self.endpoint.display_url);
         println!("Enter SQL terminated by ';'. Use .help for shell commands.");
+        self.warn_if_database_missing().await?;
 
         loop {
             let prompt = if self.buffer.is_empty() {
@@ -111,6 +117,7 @@ impl OrionCli {
                         "Shell commands:",
                         "  .help              Show this help",
                         "  .tables            List tables",
+                        "  .create [name]     Create the current or named database",
                         "  .databases         Show the current database URL",
                         "  .system            List Orion system tables",
                         "  .metrics           Show live Raft metrics",
@@ -119,10 +126,25 @@ impl OrionCli {
                         "",
                         "Environment:",
                         "  LIBSQL_URL         Default database URL",
-                        "  LIBSQL_AUTH_TOKEN  Bearer token for authenticated endpoints",
+                        "  LIBSQL_AUTH_TOKEN  Bearer token for SQL endpoints",
+                        "  ORION_AUTH_TOKEN   Bearer token for operator endpoints",
                     ]
                     .join("\n")
                 );
+                Ok(true)
+            }
+            command if command == ".create" || command.starts_with(".create ") => {
+                let name = command.trim_start_matches(".create").trim();
+                let name = if name.is_empty() {
+                    if self.endpoint.database == "_orion" {
+                        eprintln!("Usage: .create <database>");
+                        return Ok(true);
+                    }
+                    self.endpoint.database.as_str()
+                } else {
+                    name
+                };
+                self.create_database(name).await?;
                 Ok(true)
             }
             ".tables" => {
@@ -185,6 +207,73 @@ impl OrionCli {
         }
     }
 
+    async fn warn_if_database_missing(&self) -> anyhow::Result<()> {
+        if self.endpoint.database == "_orion" {
+            return Ok(());
+        }
+
+        match self.database_exists(&self.endpoint.database).await {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "{}",
+                    missing_database_hint(&self.endpoint.database, Some(".create"))
+                );
+            }
+            Err(error) => {
+                eprintln!("Could not check database catalog: {error}");
+            }
+        }
+        Ok(())
+    }
+
+    async fn database_exists(&self, name: &str) -> anyhow::Result<bool> {
+        let response = self
+            .operator_get(&format!("/_orion/databases/{name}"))
+            .await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        let status = response.status();
+        ensure!(status.is_success(), "HTTP {} {}", status.as_u16(), status);
+        Ok(true)
+    }
+
+    async fn create_database(&self, name: &str) -> anyhow::Result<()> {
+        let response = self
+            .operator_post("/_orion/databases", json!({ "name": name }))
+            .await?;
+        let status = response.status();
+        let body = response.text().await.context("reading Orion response")?;
+        if !status.is_success() {
+            let message = response_error_message(&body).unwrap_or(body);
+            anyhow::bail!("HTTP {}: {message}", status.as_u16());
+        }
+        println!("Created database {name}");
+        if name == self.endpoint.database {
+            println!("You can now run SQL against {}", self.endpoint.display_url);
+        }
+        Ok(())
+    }
+
+    async fn operator_get(&self, path: &str) -> anyhow::Result<reqwest::Response> {
+        let url = self.endpoint.operator_url(path)?;
+        let mut request = self.client.get(url);
+        if let Some(auth_token) = &self.operator_auth_token {
+            request = request.bearer_auth(auth_token);
+        }
+        request.send().await.context("sending Orion request")
+    }
+
+    async fn operator_post(&self, path: &str, body: Value) -> anyhow::Result<reqwest::Response> {
+        let url = self.endpoint.operator_url(path)?;
+        let mut request = self.client.post(url).json(&body);
+        if let Some(auth_token) = &self.operator_auth_token {
+            request = request.bearer_auth(auth_token);
+        }
+        request.send().await.context("sending Orion request")
+    }
+
     async fn run_sql(&mut self, sql: &str, args: Vec<Value>) -> anyhow::Result<()> {
         let response = self
             .pipeline(
@@ -211,6 +300,13 @@ impl OrionCli {
                 .and_then(|error| error.get("message"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown libSQL error");
+            if database_missing_message(message) {
+                anyhow::bail!(
+                    "{}\n{}",
+                    message,
+                    missing_database_hint(&self.endpoint.database, Some(".create"))
+                );
+            }
             anyhow::bail!("{message}");
         }
 
@@ -242,7 +338,7 @@ impl OrionCli {
             .post(self.endpoint.pipeline_url.clone())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .json(&body);
-        if let Some(auth_token) = &self.auth_token {
+        if let Some(auth_token) = &self.sql_auth_token {
             request = request.bearer_auth(auth_token);
         }
 
@@ -271,10 +367,17 @@ struct PipelineEndpoint {
     pipeline_url: String,
     database: String,
     system_url: String,
+    base_url: reqwest::Url,
 }
 
 impl PipelineEndpoint {
     fn parse(raw_url: &str) -> anyhow::Result<Self> {
+        let mut base_url = reqwest::Url::parse(raw_url)
+            .with_context(|| format!("parsing libSQL endpoint URL {raw_url:?}"))?;
+        base_url.set_path("/");
+        base_url.set_query(None);
+        base_url.set_fragment(None);
+
         let mut url = reqwest::Url::parse(raw_url)
             .with_context(|| format!("parsing libSQL endpoint URL {raw_url:?}"))?;
         let mut pathname = url.path().trim_end_matches('/').to_string();
@@ -292,7 +395,14 @@ impl PipelineEndpoint {
             pipeline_url,
             database,
             system_url: system_url.to_string(),
+            base_url,
         })
+    }
+
+    fn operator_url(&self, path: &str) -> anyhow::Result<reqwest::Url> {
+        self.base_url
+            .join(path.trim_start_matches('/'))
+            .with_context(|| format!("building Orion URL for {path}"))
     }
 }
 
@@ -467,6 +577,34 @@ fn statement_is_complete(sql: &str) -> bool {
 
 fn strip_trailing_semicolon(sql: &str) -> &str {
     sql.trim_end().strip_suffix(';').unwrap_or(sql).trim_end()
+}
+
+fn missing_database_hint(database: &str, shell_command: Option<&str>) -> String {
+    let mut lines = vec![
+        format!("Database {database} has not been created yet."),
+        format!("Create it with: orion db create {database}"),
+    ];
+    if let Some(command) = shell_command {
+        lines.push(format!("Or from this shell: {command}"));
+    }
+    lines.join("\n")
+}
+
+fn response_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body).ok().and_then(|json| {
+        json.get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                json.get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+    })
+}
+
+fn database_missing_message(message: &str) -> bool {
+    message.contains("has not been created")
 }
 
 fn database_name_from_path(pathname: &str) -> String {
