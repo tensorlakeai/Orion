@@ -193,7 +193,7 @@ Protocol compatibility test matrix:
 Orion is not a Turso/libSQL embedded-replica server. It is a globally
 distributed, Spanner-like database that speaks the libSQL/Hrana query protocol.
 Replication, placement, quorum, durability, and repair are Orion-owned
-systems built on OpenRaft, RocksDB, SlateDB, object storage, and NVMe cache.
+systems built on OpenRaft, Fjall, SlateDB, object storage, and NVMe cache.
 
 Non-goals:
 
@@ -224,7 +224,7 @@ Questions to close:
 - What are baseline p50/p95/p99 latencies for single-node and three-node local
   clusters?
 - How much overhead comes from Hrana HTTP, SQLite connection/session handling,
-  VFS batching, OpenRaft proposal, RocksDB fsync, and SlateDB materialization?
+  VFS batching, OpenRaft proposal, Fjall fsync, and SlateDB materialization?
 - Which workloads need batching, prepared statement reuse, connection pooling,
   or WAL write coalescing?
 

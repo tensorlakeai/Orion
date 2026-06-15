@@ -12,11 +12,11 @@ axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 bytes = "1.10"
 futures-util = "0.3"
+fjall = "3.1.5"
 openraft = { version = "0.10.0-alpha.20", features = ["serde"] }
 openraft-rt = "0.10.0-alpha.20"
 postcard = { version = "1.1.3", features = ["use-std"] }
 prost = "0.14"
-rocksdb = { version = "0.24", default-features = false }
 rusqlite = { version = "0.38", features = ["backup", "blob", "bundled", "column_decltype", "hooks"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

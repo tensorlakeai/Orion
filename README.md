@@ -64,7 +64,7 @@ pages in object storage.
                       ║                     │                              │         ║░
                       ║                     ▼                              ▼         ║░
                       ║            ┌────────┬───────┐   ┌──────────────────┬──────┐  ║░
-                      ║            │ RocksDB log    │   │ SlateDB page store      │  ║░
+                      ║            │ Fjall log      │   │ SlateDB page store      │  ║░
                       ║            │ local, hot     │   │ object storage backed   │  ║░
                       ║            └────────────────┘   └────────────┬────────────┘  ║░
                       ║                                              │               ║░
@@ -82,7 +82,7 @@ pages in object storage.
 - **Orion VFS:** the distributed file layer that captures SQLite writes.
 - **OpenRaft:** consensus for ordered, durable commits inside a replication
   group.
-- **Storage:** RocksDB stores the hot Raft log locally; SlateDB materializes
+- **Storage:** Fjall stores the hot Raft log locally; SlateDB materializes
   database pages into object storage. Local SQLite files and NVMe are cache and
   execution state, not the source of truth.
 

@@ -1853,7 +1853,7 @@ async fn open_raft_group(
 ) -> anyhow::Result<OpenedRaftGroup> {
     let raft_log_root = config.raft_log_root_for_group(group_id)?;
     std::fs::create_dir_all(&raft_log_root)
-        .with_context(|| format!("creating RocksDB dir {raft_log_root}"))?;
+        .with_context(|| format!("creating Raft log dir {raft_log_root}"))?;
     let has_existing_raft_state = persisted_raft_log_state_initialized_at(&raft_log_root).await?;
 
     let object_store = open_object_store(&config.storage.object_store)?;
@@ -2056,7 +2056,7 @@ async fn bootstrap_raft_if_needed(
 
 async fn persisted_raft_log_state_initialized_at(raft_log_root: &str) -> anyhow::Result<bool> {
     std::fs::create_dir_all(raft_log_root)
-        .with_context(|| format!("creating RocksDB dir {raft_log_root}"))?;
+        .with_context(|| format!("creating Raft log dir {raft_log_root}"))?;
     let mut log_store = OrionRaftLogStore::open(raft_log_root)?;
     let log_state = log_store
         .get_log_state()
@@ -2710,7 +2710,7 @@ const COMMENTED_EXAMPLE_CONFIG: &str = r#"# Orion single-node starter config.
 #
 # The default shape is a one-process development node:
 # - one OpenRaft voter
-# - local RocksDB Raft log
+# - local Fjall Raft log
 # - local SlateDB object-store root
 # - libSQL/Hrana HTTP on 127.0.0.1:8091
 #

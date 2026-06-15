@@ -6,13 +6,13 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
+fjall.workspace = true
 futures-util.workspace = true
 orion-sqlite = { path = "../orion-sqlite" }
 openraft.workspace = true
 openraft-rt.workspace = true
 postcard.workspace = true
 prost.workspace = true
-rocksdb.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

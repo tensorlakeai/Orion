@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use futures_util::{Stream, StreamExt};
 use openraft::entry::RaftEntry;
 use openraft::storage::{
@@ -15,10 +16,6 @@ use openraft::storage::{
 };
 use openraft::{EntryPayload, RaftTypeConfig, SnapshotMeta, StoredMembership};
 use orion_sqlite::{FileKind, VfsFileOp, VfsSyncBatch, VfsWrite};
-use rocksdb::{
-    ColumnFamily, ColumnFamilyDescriptor, DB, Direction, IteratorMode, Options, WriteBatch,
-    WriteOptions,
-};
 use serde::{Deserialize, Serialize};
 use slatedb::admin::AdminBuilder;
 use slatedb::config::{CheckpointOptions, CheckpointScope, WriteOptions as SlateWriteOptions};
@@ -275,49 +272,33 @@ struct OrionSnapshotSqliteDatabase {
 
 #[derive(Clone)]
 pub struct OrionRaftLogStore {
-    db: Arc<DB>,
+    db: Database,
+    meta: Keyspace,
+    log: Keyspace,
 }
 
 impl OrionRaftLogStore {
     pub fn open(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-        let cf_opts = Options::default();
-        Ok(Self {
-            db: Arc::new(
-                DB::open_cf_descriptors(
-                    &opts,
-                    path,
-                    [
-                        ColumnFamilyDescriptor::new(META_CF, cf_opts.clone()),
-                        ColumnFamilyDescriptor::new(LOG_CF, cf_opts),
-                    ],
-                )
-                .context("opening OpenRaft RocksDB store")?,
-            ),
-        })
+        let db = Database::builder(path)
+            .open()
+            .context("opening OpenRaft Fjall store")?;
+        let meta = db
+            .keyspace(META_CF, KeyspaceCreateOptions::default)
+            .context("opening OpenRaft Fjall metadata keyspace")?;
+        let log = db
+            .keyspace(LOG_CF, KeyspaceCreateOptions::default)
+            .context("opening OpenRaft Fjall log keyspace")?;
+        Ok(Self { db, meta, log })
     }
 
-    fn cf(&self, name: &str) -> io::Result<&ColumnFamily> {
-        self.db.cf_handle(name).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("missing RocksDB column family {name}"),
-            )
-        })
-    }
-
-    fn sync_write(&self, batch: WriteBatch) -> io::Result<()> {
-        let mut write_options = WriteOptions::default();
-        write_options.set_sync(true);
+    fn sync_write(&self, batch: fjall::OwnedWriteBatch) -> io::Result<()> {
         let started = Instant::now();
-        let result = self
-            .db
-            .write_opt(batch, &write_options)
+        let result = batch
+            .durability(Some(PersistMode::SyncAll))
+            .commit()
             .map_err(to_io_error);
         trace_latency(format_args!(
-            "rocksdb_sync_write elapsed_ms={:.3} ok={}",
+            "fjall_sync_write elapsed_ms={:.3} ok={}",
             started.elapsed().as_secs_f64() * 1000.0,
             result.is_ok()
         ));
@@ -325,26 +306,24 @@ impl OrionRaftLogStore {
     }
 
     fn put_encoded<T: Serialize>(&self, key: &[u8], value: &T) -> io::Result<()> {
-        let mut batch = WriteBatch::default();
-        let meta_cf = self.cf(META_CF)?;
-        batch.put_cf(&meta_cf, key, encode_store_value(value)?);
+        let mut batch = self.db.batch();
+        batch.insert(&self.meta, key, encode_store_value(value)?);
         self.sync_write(batch)
     }
 
     fn get_encoded<T: for<'de> Deserialize<'de>>(&self, key: &[u8]) -> io::Result<Option<T>> {
-        self.db
-            .get_cf(&self.cf(META_CF)?, key)
+        self.meta
+            .get(key)
             .map_err(to_io_error)?
-            .map(|bytes| decode_store_value(&bytes))
+            .map(|bytes| decode_store_value(bytes.as_ref()))
             .transpose()
     }
 
     fn sync_optional_log_id(&self, key: &[u8], log_id: Option<&OrionLogId>) -> io::Result<()> {
-        let mut batch = WriteBatch::default();
-        let meta_cf = self.cf(META_CF)?;
+        let mut batch = self.db.batch();
         match log_id {
-            Some(log_id) => batch.put_cf(&meta_cf, key, encode_store_value(log_id)?),
-            None => batch.delete_cf(&meta_cf, key),
+            Some(log_id) => batch.insert(&self.meta, key, encode_store_value(log_id)?),
+            None => batch.remove(&self.meta, key),
         }
         self.sync_write(batch)
     }
@@ -373,19 +352,15 @@ impl RaftLogReader<OrionTypeConfig> for OrionRaftLogStore {
         };
 
         let mut entries = Vec::new();
-        let log_cf = self.cf(LOG_CF)?;
-        let iter = self.db.iterator_cf(
-            &log_cf,
-            IteratorMode::From(&log_key(start), Direction::Forward),
-        );
+        let iter = self.log.range(log_key(start)..);
 
         for item in iter {
-            let (key, value) = item.map_err(to_io_error)?;
-            let index = index_from_log_key(&key)?;
+            let (key, value) = item.into_inner().map_err(to_io_error)?;
+            let index = index_from_log_key(key.as_ref())?;
             if index >= end_exclusive {
                 break;
             }
-            entries.push(decode_store_value(&value)?);
+            entries.push(decode_store_value(value.as_ref())?);
         }
 
         Ok(entries)
@@ -435,16 +410,18 @@ impl RaftLogStorage<OrionTypeConfig> for OrionRaftLogStore {
         I: IntoIterator<Item = OrionEntry> + openraft::OptionalSend,
         I::IntoIter: openraft::OptionalSend,
     {
-        let mut batch = WriteBatch::default();
-        let meta_cf = self.cf(META_CF)?;
-        let log_cf = self.cf(LOG_CF)?;
+        let mut batch = self.db.batch();
         let mut last_log_id = None;
         for entry in entries {
             last_log_id = Some(entry.log_id());
-            batch.put_cf(&log_cf, log_key(entry.index()), encode_store_value(&entry)?);
+            batch.insert(
+                &self.log,
+                log_key(entry.index()),
+                encode_store_value(&entry)?,
+            );
         }
         if let Some(log_id) = last_log_id {
-            batch.put_cf(&meta_cf, META_LAST_LOG_ID, encode_store_value(&log_id)?);
+            batch.insert(&self.meta, META_LAST_LOG_ID, encode_store_value(&log_id)?);
         }
         let result = self.sync_write(batch);
         callback.io_completed(result.as_ref().map(|_| ()).map_err(clone_io_error));
@@ -453,47 +430,38 @@ impl RaftLogStorage<OrionTypeConfig> for OrionRaftLogStore {
 
     async fn truncate_after(&mut self, last_log_id: Option<OrionLogId>) -> Result<(), io::Error> {
         let keep_index = last_log_id.as_ref().map(|log_id| log_id.index).unwrap_or(0);
-        let mut batch = WriteBatch::default();
-        let meta_cf = self.cf(META_CF)?;
-        let log_cf = self.cf(LOG_CF)?;
-        let iter = self.db.iterator_cf(
-            &log_cf,
-            IteratorMode::From(&log_key(keep_index + 1), Direction::Forward),
-        );
+        let mut batch = self.db.batch();
+        let iter = self.log.range(log_key(keep_index + 1)..);
 
         for item in iter {
-            let (key, _) = item.map_err(to_io_error)?;
-            batch.delete_cf(&log_cf, key);
+            let (key, _) = item.into_inner().map_err(to_io_error)?;
+            batch.remove(&self.log, key);
         }
         match &last_log_id {
-            Some(log_id) => batch.put_cf(&meta_cf, META_LAST_LOG_ID, encode_store_value(log_id)?),
-            None => batch.delete_cf(&meta_cf, META_LAST_LOG_ID),
+            Some(log_id) => batch.insert(&self.meta, META_LAST_LOG_ID, encode_store_value(log_id)?),
+            None => batch.remove(&self.meta, META_LAST_LOG_ID),
         }
         self.sync_write(batch)
     }
 
     async fn purge(&mut self, log_id: OrionLogId) -> Result<(), io::Error> {
-        let mut batch = WriteBatch::default();
-        let meta_cf = self.cf(META_CF)?;
-        let log_cf = self.cf(LOG_CF)?;
-        let iter = self
-            .db
-            .iterator_cf(&log_cf, IteratorMode::From(&log_key(0), Direction::Forward));
+        let mut batch = self.db.batch();
+        let iter = self.log.range(log_key(0)..);
 
         for item in iter {
-            let (key, _) = item.map_err(to_io_error)?;
-            if index_from_log_key(&key)? > log_id.index {
+            let (key, _) = item.into_inner().map_err(to_io_error)?;
+            if index_from_log_key(key.as_ref())? > log_id.index {
                 break;
             }
-            batch.delete_cf(&log_cf, key);
+            batch.remove(&self.log, key);
         }
-        batch.put_cf(&meta_cf, META_PURGED, encode_store_value(&log_id)?);
+        batch.insert(&self.meta, META_PURGED, encode_store_value(&log_id)?);
         if self
             .last_present_log_id()?
             .as_ref()
             .is_some_and(|last| last.index <= log_id.index)
         {
-            batch.put_cf(&meta_cf, META_LAST_LOG_ID, encode_store_value(&log_id)?);
+            batch.insert(&self.meta, META_LAST_LOG_ID, encode_store_value(&log_id)?);
         }
         self.sync_write(batch)
     }

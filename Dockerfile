@@ -1,7 +1,7 @@
 FROM rust:1-bookworm AS builder
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake g++ libclang-dev make pkg-config \
+    && apt-get install -y --no-install-recommends libclang-dev make pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
@@ -16,7 +16,7 @@ RUN cargo build --release --locked
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /workspace/target/release/orion /usr/local/bin/orion

@@ -30,13 +30,13 @@ client transaction
   -> SQLite engine
   -> orion_vfs write/sync batch
   -> OpenRaft proposal
-  -> RocksDB sync write
+  -> Fjall sync write
   -> commit acknowledged
   -> SlateDB materialization
   -> object storage checkpoint/compaction
 ```
 
-RocksDB on local NVMe stores the hot Raft log and is the synchronous durability
+Fjall on local NVMe stores the hot Raft log and is the synchronous durability
 boundary. SlateDB stores materialized state over object storage. Local SQLite
 files are cache/materialization, not the source of truth.
 
@@ -44,8 +44,7 @@ files are cache/materialization, not the source of truth.
 
 - `orion-sqlite`: SQLite VFS integration, Hrana-facing SQLite runtime, and
   the `RaftWalCommitSink` durability boundary.
-- `OrionRaftLogStore`: OpenRaft log storage backed by RocksDB column
-  families.
+- `OrionRaftLogStore`: OpenRaft log storage backed by Fjall keyspaces.
 - `OrionRaftStateMachine`: OpenRaft state machine that applies committed
   SQLite VFS batches into SlateDB.
 - `TonicRaftNetwork`: OpenRaft transport over gRPC/HTTP2 with timeouts and
@@ -61,8 +60,8 @@ The production compatibility work is tracked in
 
 ## Development
 
-On this machine, RocksDB's bindgen build needs the CommandLineTools libclang.
-The repository configures that in `.cargo/config.toml`.
+On this machine, the SQLite extension build needs the CommandLineTools
+libclang. The repository configures that in `.cargo/config.toml`.
 
 ```bash
 cargo test
@@ -321,7 +320,7 @@ Important fields:
 - `raft_addr`
 - `advertised_raft_addr`
 - `topology`
-- `rocksdb_path`
+- `storage.local.raft_log_root`
 - `slatedb_path`
 - `object_store`
 - `peers`
