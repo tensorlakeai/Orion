@@ -45,7 +45,7 @@ Orion is designed for that gap.
 - **Cross-cloud from the beginning.** Nodes advertise cloud, region, and zone;
   placement groups can span one region, multiple regions, or multiple clouds.
 
-## What Orion Runs
+## Architecture
 
 Orion is one binary with a simple request path. Applications talk to the
 libSQL API. SQLite plans and executes the SQL. The Orion VFS turns SQLite page
