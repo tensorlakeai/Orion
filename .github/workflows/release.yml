@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to publish, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset_suffix }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset_suffix: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - asset_suffix: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - asset_suffix: linux-arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            g++ \
+            libclang-dev \
+            llvm-dev \
+            make \
+            pkg-config
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+
+      - name: Configure macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache Cargo build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-
+
+      - name: Build release binary
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: cargo build --locked --release --bin orion --target ${{ matrix.target }}
+
+      - name: Verify binary starts
+        run: target/${{ matrix.target }}/release/orion --help
+
+      - name: Package binary
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          package="orion-${version}-${{ matrix.asset_suffix }}"
+          archive="${package}.tar.gz"
+
+          mkdir -p "dist/${package}"
+          cp "target/${{ matrix.target }}/release/orion" "dist/${package}/orion"
+          chmod +x "dist/${package}/orion"
+
+          cp README.md "dist/${package}/README.md"
+          cp DEVELOPERS.md "dist/${package}/DEVELOPERS.md"
+
+          tar -C dist -czf "dist/${archive}" "${package}"
+          tar -tzf "dist/${archive}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orion-${{ matrix.asset_suffix }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          prerelease=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --title "Orion ${RELEASE_TAG}" \
+              --generate-notes \
+              "${prerelease[@]}"
+          fi
