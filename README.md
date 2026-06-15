@@ -113,7 +113,7 @@ the product-facing path is a downloaded `orion` executable.
 Start a single-node Orion server:
 
 ```bash
-orion
+orion server
 ```
 
 Running without a config starts a persisted one-node cluster with safe local
@@ -152,7 +152,7 @@ Create an editable starter config:
 
 ```bash
 orion init-config
-orion --config orion.yaml
+orion server --config orion.yaml
 ```
 
 The generated YAML is heavily commented and explains how to change storage
@@ -367,9 +367,9 @@ Start node2 and node3 first, then node1. Node1 bootstraps a fresh default group
 and skips bootstrap when it already has local Raft state.
 
 ```bash
-orion --config examples/node2.yaml
-orion --config examples/node3.yaml
-orion --config examples/node1.yaml
+orion server --config examples/node2.yaml
+orion server --config examples/node3.yaml
+orion server --config examples/node1.yaml
 ```
 
 For a real single-region deployment, use the same pattern but set each node's

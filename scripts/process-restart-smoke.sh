@@ -63,7 +63,7 @@ echo "building orion binary"
 start_orion() {
   local log_file="$1"
   DYLD_FALLBACK_LIBRARY_PATH="${DYLD_FALLBACK_LIBRARY_PATH:-/Library/Developer/CommandLineTools/usr/lib}" \
-    "$repo_root/target/debug/orion" --config "$config" >"$log_file" 2>&1 &
+    "$repo_root/target/debug/orion" server --config "$config" >"$log_file" 2>&1 &
   pid="$!"
   wait_for_http
 }

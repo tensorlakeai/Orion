@@ -61,7 +61,7 @@ echo "building orion binary"
 (cd "$repo_root" && cargo build --bin orion >/dev/null)
 
 DYLD_FALLBACK_LIBRARY_PATH="${DYLD_FALLBACK_LIBRARY_PATH:-/Library/Developer/CommandLineTools/usr/lib}" \
-  "$repo_root/target/debug/orion" --config "$config" >"$log_file" 2>&1 &
+  "$repo_root/target/debug/orion" server --config "$config" >"$log_file" 2>&1 &
 pid="$!"
 
 deadline=$((SECONDS + 30))

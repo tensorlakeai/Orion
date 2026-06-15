@@ -29,6 +29,7 @@ services:
     command:
       [
         "/opt/orion-bin/orion",
+        "server",
         "--config",
         "${ORION_DOCKER_NODE1_CONFIG:-/workspace/docker/cluster/node1.yaml}",
       ]
@@ -57,6 +58,7 @@ services:
     command:
       [
         "/opt/orion-bin/orion",
+        "server",
         "--config",
         "${ORION_DOCKER_NODE2_CONFIG:-/workspace/docker/cluster/node2.yaml}",
       ]
@@ -81,6 +83,7 @@ services:
     command:
       [
         "/opt/orion-bin/orion",
+        "server",
         "--config",
         "${ORION_DOCKER_NODE3_CONFIG:-/workspace/docker/cluster/node3.yaml}",
       ]

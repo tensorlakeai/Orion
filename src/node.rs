@@ -2706,7 +2706,7 @@ fn normalize_http_endpoint(addr: &str) -> String {
 const COMMENTED_EXAMPLE_CONFIG: &str = r#"# Orion single-node starter config.
 #
 # Run it with:
-#   orion --config orion.yaml
+#   orion server --config orion.yaml
 #
 # The default shape is a one-process development node:
 # - one OpenRaft voter

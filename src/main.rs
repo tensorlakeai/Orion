@@ -12,7 +12,7 @@ use node::{DefaultConfig, NodeConfig, run_node};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     match command_from_args()? {
-        Command::Run { config_path } => {
+        Command::Server { config_path } => {
             let used_default_config = config_path.is_none();
             let (config, source) = match config_path {
                 Some(config_path) => {
@@ -49,11 +49,15 @@ async fn main() -> anyhow::Result<()> {
         Command::InitConfig { output_path, force } => write_initial_config(&output_path, force),
         Command::Cli { url } => cli::run_cli(url).await,
         Command::Db { args } => db_cli::run_db_cli(args).await,
+        Command::Help { usage } => {
+            println!("{usage}");
+            Ok(())
+        }
     }
 }
 
 enum Command {
-    Run {
+    Server {
         config_path: Option<std::path::PathBuf>,
     },
     InitConfig {
@@ -66,15 +70,19 @@ enum Command {
     Db {
         args: Vec<String>,
     },
+    Help {
+        usage: &'static str,
+    },
 }
 
 fn command_from_args() -> anyhow::Result<Command> {
     let mut args = std::env::args().skip(1);
     let Some(first) = args.next() else {
-        return Ok(Command::Run { config_path: None });
+        return Ok(Command::Help { usage: USAGE });
     };
 
     match first.as_str() {
+        "server" => server_command_from_args(args),
         "db" => Ok(Command::Db {
             args: args.collect(),
         }),
@@ -108,23 +116,44 @@ fn command_from_args() -> anyhow::Result<Command> {
             }
             Ok(Command::InitConfig { output_path, force })
         }
+        "--config" | "-c" => Err(anyhow::anyhow!(
+            "server startup now uses `orion server --config <node.yaml>`\n\n{USAGE}"
+        )),
+        "--help" | "-h" => Ok(Command::Help { usage: USAGE }),
+        path if !path.starts_with('-') => Err(anyhow::anyhow!(
+            "unknown command {path:?}; to start a server with a config file, use `orion server {path}`\n\n{USAGE}"
+        )),
+        _ => Err(anyhow::anyhow!("unknown argument {first:?}\n\n{USAGE}")),
+    }
+}
+
+fn server_command_from_args(mut args: impl Iterator<Item = String>) -> anyhow::Result<Command> {
+    let Some(first) = args.next() else {
+        return Ok(Command::Server { config_path: None });
+    };
+
+    match first.as_str() {
         "--config" | "-c" => {
             let path = args
                 .next()
-                .ok_or_else(|| anyhow::anyhow!("--config requires a path"))?;
+                .ok_or_else(|| anyhow::anyhow!("server --config requires a path"))?;
             ensure_no_extra_args(args)?;
-            Ok(Command::Run {
+            Ok(Command::Server {
                 config_path: Some(path.into()),
             })
         }
-        "--help" | "-h" => Err(anyhow::anyhow!(USAGE)),
+        "--help" | "-h" => Ok(Command::Help {
+            usage: SERVER_USAGE,
+        }),
         path if !path.starts_with('-') => {
             ensure_no_extra_args(args)?;
-            Ok(Command::Run {
+            Ok(Command::Server {
                 config_path: Some(path.into()),
             })
         }
-        _ => Err(anyhow::anyhow!("unknown argument {first:?}\n\n{USAGE}")),
+        _ => Err(anyhow::anyhow!(
+            "unknown server argument {first:?}\n\n{SERVER_USAGE}"
+        )),
     }
 }
 
@@ -157,20 +186,24 @@ fn write_initial_config(output_path: &Path, force: bool) -> anyhow::Result<()> {
 }
 
 const USAGE: &str = r#"usage:
-  orion                         Start one local single-node server with defaults
-  orion --config <node.yaml>    Start with a YAML config
-  orion <node.yaml>             Start with a YAML config
+  orion server [--config <node.yaml>]
   orion db <command>            Manage databases and placement
   orion cli [url]               Open the libSQL shell
   orion init-config [path]      Write a commented starter config
 
 examples:
+  orion server
+  orion server --config ./orion.yaml
   orion db create appdb
   orion db list
   orion cli
   orion init-config
-  orion init-config ./orion.yaml
-  orion --config ./orion.yaml"#;
+  orion init-config ./orion.yaml"#;
+
+const SERVER_USAGE: &str = r#"usage:
+  orion server                         Start one local single-node server with defaults
+  orion server --config <node.yaml>    Start with a YAML config
+  orion server <node.yaml>             Start with a YAML config"#;
 
 const INIT_CONFIG_USAGE: &str = r#"usage:
   orion init-config [path]

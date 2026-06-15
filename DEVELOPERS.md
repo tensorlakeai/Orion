@@ -69,18 +69,18 @@ cargo test
 
 ## Run One Node
 
-Running without arguments starts a persisted one-node development cluster using
+The `server` subcommand starts a persisted one-node development cluster using
 built-in defaults and prints all configured paths and endpoints.
 
 ```bash
-cargo run
+cargo run -- server
 ```
 
 To create an editable config:
 
 ```bash
 cargo run -- init-config
-cargo run -- --config orion.yaml
+cargo run -- server --config orion.yaml
 ```
 
 The default libSQL/Hrana HTTP endpoint is:
@@ -168,9 +168,9 @@ Start node2 and node3 first, then node1. Node1 bootstraps a fresh cluster and
 skips initialization when local Raft state already exists.
 
 ```bash
-cargo run -- --config examples/node2.yaml
-cargo run -- --config examples/node3.yaml
-cargo run -- --config examples/node1.yaml
+cargo run -- server --config examples/node2.yaml
+cargo run -- server --config examples/node3.yaml
+cargo run -- server --config examples/node1.yaml
 ```
 
 The checked-in examples simulate a three-region, multi-cloud deployment:

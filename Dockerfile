@@ -23,3 +23,4 @@ COPY --from=builder /workspace/target/release/orion /usr/local/bin/orion
 COPY docker/cluster /etc/orion
 
 ENTRYPOINT ["/usr/local/bin/orion"]
+CMD ["server"]
