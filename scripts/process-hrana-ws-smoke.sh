@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "$(pnpm --version)" != "11.28.5" ]]; then
+  echo "Use pnpm 11.28.5 with Node.js 22+ for the smoke tests" >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workdir="${ORION_WS_SMOKE_DIR:-$(mktemp -d)}"
 keep_workdir="${ORION_WS_SMOKE_KEEP:-0}"
@@ -90,7 +95,7 @@ if (( SECONDS >= deadline )); then
 fi
 
 echo "installing WebSocket smoke dependency"
-(cd "$node_workdir" && npm init -y >/dev/null && npm install ws >/dev/null)
+(cd "$node_workdir" && printf '%s\n' '{"private":true,"packageManager":"pnpm@11.28.5"}' > package.json && cp "$repo_root/scripts/node-install-policy.yaml" pnpm-workspace.yaml && pnpm add --ignore-scripts --save-exact ws >/dev/null)
 cp "$repo_root/scripts/hrana-ws-smoke.mjs" "$node_workdir/smoke.mjs"
 
 echo "running Hrana WebSocket compatibility smoke"

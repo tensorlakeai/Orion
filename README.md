@@ -838,3 +838,13 @@ single-node, process-based, Docker multi-node, placement, standby, and chaos
 tests. The public-facing product direction is a multi-tenant, libSQL-compatible,
 object-store-backed database service with placement rules that can span one
 zone, one region, multiple regions, or multiple clouds.
+
+## Node smoke-test dependencies
+
+Use Node.js 22+ and pnpm 11.28.5 for the libSQL, Drizzle and WebSocket smoke
+tests. Bootstrap the fixed manager with `npm install --global --ignore-scripts
+pnpm@11.28.5`. Each temporary test project records exact resolutions under
+`scripts/node-install-policy.yaml`: strict 24-hour release age, required
+timestamps, disabled install hooks and policy rechecks. The selected libSQL
+client override remains supported through the same guards. Database smoke
+tests still require their existing local services.
